@@ -30,11 +30,11 @@ consume array equations the structure needed to generate looped code.
 Boundary, extrapolation and corner equations are generated pointwise as in
 [`ScalarizedDiscretization`](@ref), as are interior points close enough to a boundary
 that their stencil differs from the translation-invariant interior stencil. Equations
-containing patterns with no slice representation (WENO or functional advection schemes,
-nonlinear or spherical Laplacians, integrals, mixed derivatives, interface/periodic
-boundary conditions, staggered grids, boundary values appearing in interior equations)
-automatically fall back to pointwise scalar equations, so results are always identical
-to `ScalarizedDiscretization`.
+containing patterns with no slice representation (nonlinear or spherical Laplacians,
+integrals, mixed derivatives, interfaces joining two different variables, staggered
+grids, boundary values appearing in interior equations) automatically fall back to
+pointwise scalar equations, so results are always identical to
+`ScalarizedDiscretization`. Functional / WENO advection is represented in slice form.
 
 Pass as `discretization_strategy` to [`MOLFiniteDifference`](@ref). Use
 [`StrictArrayDiscretization`](@ref) to make the fallback an error instead.

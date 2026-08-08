@@ -34,6 +34,8 @@ Periodic and interface boundary conditions are supported on nonuniform grids. St
 
 Specified on pages 8-9 of [this document](https://repository.library.brown.edu/studio/item/bdr:297524/PDF/)
 
+With `ArrayDiscretization()`, WENO and other `FunctionalScheme`s are emitted as a single symbolic array equation over shifted slices of the discrete variables (the scheme function is traced once; its stencil taps become broadcast operations). Near-boundary points that use a scheme's dedicated boundary functions remain pointwise, as do points whose periodic taps wrap the seam. Numerics match `ScalarizedDiscretization`.
+
 ## FunctionalScheme
 
 `WENOScheme` is itself implemented as a `FunctionalScheme`, a general mechanism for supplying your own advection scheme as a set of Julia functions. See the docstring below, and [the developer notes](devnotes.md) for how schemes are wired into the discretization.

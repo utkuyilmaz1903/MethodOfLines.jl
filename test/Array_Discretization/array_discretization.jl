@@ -455,7 +455,9 @@ end
     @test sol_arr[u(t, x)] ≈ sol_scal[u(t, x)] rtol = 1.0e-6
 end
 
-@testset "Fallback: WENO scheme still matches the scalar path" begin
+@testset "WENO scheme (uniform) is in array form and matches the scalar path" begin
+    # Previously a fallback case; FunctionalScheme advection is now traced once and
+    # substituted onto shifted slices, so the interior collapses to one array equation.
     @parameters t x
     @variables u(..)
     Dt = Differential(t)
@@ -472,8 +474,181 @@ end
         kwsolve = (; dt = 1.0e-3)
     )
     @test sol_arr.retcode == SciMLBase.ReturnCode.Success
-    @test narrayeqs_interior(sys_arr) == 0
-    @test sol_arr[u(t, x)] ≈ sol_scal[u(t, x)] rtol = 1.0e-6
+    @test narrayeqs_interior(sys_arr) == 1
+    # Uniform WENO does not use grid coordinates in the kernel, so the array and scalar
+    # traces agree bitwise after mtkcompile scalarization.
+    @test sol_arr[u(t, x)] == sol_scal[u(t, x)]
+end
+
+@testset "WENO Burgers (nonlinear advection) in array form" begin
+    @parameters t x
+    @variables u(..)
+    Dt = Differential(t)
+    Dx = Differential(x)
+
+    eq = Dt(u(t, x)) ~ -u(t, x) * Dx(u(t, x))
+    bcs = [
+        u(0, x) ~ 0.5 + 0.4 * sin(2π * x),
+        u(t, 0) ~ 0.5, u(t, 1) ~ 0.5,
+    ]
+    domains = [t ∈ Interval(0.0, 0.1), x ∈ Interval(0.0, 1.0)]
+    @named pdesys = PDESystem(eq, bcs, domains, [t, x], [u(t, x)])
+
+    sol_arr, sol_scal, sys_arr = solve_both(
+        pdesys, [x => 0.05], t;
+        disc_kwargs = (; advection_scheme = WENOScheme()), solver = SSPRK22(),
+        kwsolve = (; dt = 5.0e-4, adaptive = false)
+    )
+    @test SciMLBase.successful_retcode(sol_arr)
+    @test narrayeqs_interior(sys_arr) == 1
+    @test sol_arr[u(t, x)] ≈ sol_scal[u(t, x)] rtol = 1.0e-10
+end
+
+@testset "WENO 2D advection-diffusion in array form" begin
+    @parameters t x y
+    @variables u(..)
+    Dt = Differential(t)
+    Dx = Differential(x)
+    Dy = Differential(y)
+    Dxx = Differential(x)^2
+    Dyy = Differential(y)^2
+
+    eq = Dt(u(t, x, y)) ~ -Dx(u(t, x, y)) - Dy(u(t, x, y)) +
+        0.05 * (Dxx(u(t, x, y)) + Dyy(u(t, x, y)))
+    bcs = [
+        u(0, x, y) ~ exp(-50 * ((x - 0.3)^2 + (y - 0.3)^2)),
+        u(t, 0, y) ~ 0.0, u(t, 1, y) ~ 0.0,
+        u(t, x, 0) ~ 0.0, u(t, x, 1) ~ 0.0,
+    ]
+    domains = [
+        t ∈ Interval(0.0, 0.05), x ∈ Interval(0.0, 1.0), y ∈ Interval(0.0, 1.0),
+    ]
+    @named pdesys = PDESystem(eq, bcs, domains, [t, x, y], [u(t, x, y)])
+
+    sol_arr, sol_scal, sys_arr = solve_both(
+        pdesys, [x => 0.1, y => 0.1], t;
+        disc_kwargs = (; advection_scheme = WENOScheme()), solver = SSPRK22(),
+        kwsolve = (; dt = 1.0e-3, adaptive = false)
+    )
+    @test SciMLBase.successful_retcode(sol_arr)
+    @test narrayeqs_interior(sys_arr) == 1
+    @test sol_arr[u(t, x, y)] ≈ sol_scal[u(t, x, y)] rtol = 1.0e-10
+end
+
+@testset "WENO periodic 1D advection in array form" begin
+    @parameters t x
+    @variables u(..)
+    Dt = Differential(t)
+    Dx = Differential(x)
+
+    eq = Dt(u(t, x)) ~ -Dx(u(t, x))
+    bcs = [u(0, x) ~ exp(-100 * (x - 0.5)^2), u(t, 0) ~ u(t, 1)]
+    domains = [t ∈ Interval(0.0, 0.1), x ∈ Interval(0.0, 1.0)]
+    @named pdesys = PDESystem(eq, bcs, domains, [t, x], [u(t, x)])
+
+    sol_arr, sol_scal, sys_arr = solve_both(
+        pdesys, [x => 0.05], t;
+        disc_kwargs = (; advection_scheme = WENOScheme()), solver = SSPRK22(),
+        kwsolve = (; dt = 1.0e-3, adaptive = false)
+    )
+    @test SciMLBase.successful_retcode(sol_arr)
+    # Clean core is one array equation; seam points whose ±2 taps wrap are pointwise.
+    @test narrayeqs_interior(sys_arr) == 1
+    @test sol_arr[u(t, x)] ≈ sol_scal[u(t, x)] rtol = 1.0e-10
+end
+
+@testset "Custom FunctionalScheme in array form" begin
+    # Genus proof: any FunctionalScheme, not just WENO, gets the slice representation.
+    @parameters t x
+    @variables u(..)
+    Dt = Differential(t)
+    Dx = Differential(x)
+
+    f_interior = (u, p, t, x, dx) -> (u[3] - u[1]) / (2 * dx)
+    f_lower = (u, p, t, x, dx) -> (u[2] - u[1]) / dx
+    f_upper = (u, p, t, x, dx) -> (u[2] - u[1]) / dx
+    scheme = FunctionalScheme{3, 2}(
+        f_interior, [f_lower], [f_upper], false; name = "centered3"
+    )
+
+    eq = Dt(u(t, x)) ~ -Dx(u(t, x))
+    bcs = [u(0, x) ~ exp(-100 * (x - 0.3)^2), u(t, 0) ~ 0.0, u(t, 1) ~ 0.0]
+    domains = [t ∈ Interval(0.0, 0.1), x ∈ Interval(0.0, 1.0)]
+    @named pdesys = PDESystem(eq, bcs, domains, [t, x], [u(t, x)])
+
+    sol_arr, sol_scal, sys_arr = solve_both(
+        pdesys, [x => 0.05], t;
+        disc_kwargs = (; advection_scheme = scheme), solver = SSPRK22(),
+        kwsolve = (; dt = 1.0e-3, adaptive = false)
+    )
+    @test SciMLBase.successful_retcode(sol_arr)
+    @test narrayeqs_interior(sys_arr) == 1
+    @test sol_arr[u(t, x)] == sol_scal[u(t, x)]
+end
+
+@testset "WENO nonuniform grid: array core plus scalar frame" begin
+    # Non-uniform WENO uses extent=0, so the two near-boundary interior points per end
+    # take WENONonUniformBoundary schemes and stay pointwise (the frame); the clean core
+    # is one array equation. Coordinate algebra folds to numeric weights at arrayify time.
+    @parameters t x
+    @variables u(..)
+    Dt = Differential(t)
+    Dx = Differential(x)
+
+    eq = Dt(u(t, x)) ~ -Dx(u(t, x))
+    bcs = [u(0, x) ~ exp(-100 * (x - 0.3)^2), u(t, 0) ~ 0.0, u(t, 1) ~ 0.0]
+    domains = [t ∈ Interval(0.0, 0.1), x ∈ Interval(0.0, 1.0)]
+    @named pdesys = PDESystem(eq, bcs, domains, [t, x], [u(t, x)])
+
+    xg = collect(range(0.0, 1.0; length = 25))
+    xg[13] = 0.52
+    xg = sort(unique(xg))
+
+    sol_arr, sol_scal, sys_arr = solve_both(
+        pdesys, [x => xg], t;
+        disc_kwargs = (; advection_scheme = WENOScheme()), solver = SSPRK22(),
+        kwsolve = (; dt = 1.0e-3, adaptive = false)
+    )
+    @test SciMLBase.successful_retcode(sol_arr)
+    @test narrayeqs_interior(sys_arr) == 1
+    # Folding order of symbolic-x̂ vs numeric-x traces may differ; require tight parity.
+    @test sol_arr[u(t, x)] ≈ sol_scal[u(t, x)] rtol = 1.0e-12
+end
+
+@testset "WENO interior expression size is independent of resolution" begin
+    @parameters t x
+    @variables u(..)
+    Dt = Differential(t)
+    Dx = Differential(x)
+
+    eq = Dt(u(t, x)) ~ -Dx(u(t, x))
+    bcs = [u(0, x) ~ exp(-100 * (x - 0.3)^2), u(t, 0) ~ 0.0, u(t, 1) ~ 0.0]
+    domains = [t ∈ Interval(0.0, 0.1), x ∈ Interval(0.0, 1.0)]
+    @named pdesys = PDESystem(eq, bcs, domains, [t, x], [u(t, x)])
+
+    function treesize(z)
+        z = Symbolics.unwrap(z)
+        SymbolicUtils.iscall(z) || return 1
+        return 1 + sum(treesize, SymbolicUtils.arguments(z); init = 0)
+    end
+    interior_size(sys) = sum(
+        treesize(eq.lhs) + treesize(eq.rhs)
+            for eq in get_eqs(sys) if isinterioreq(eq) && isarrayeq(eq);
+        init = 0
+    )
+
+    sizes = map([21, 81]) do n
+        disc = MOLFiniteDifference(
+            [x => 1 / (n - 1)], t;
+            discretization_strategy = ArrayDiscretization(),
+            advection_scheme = WENOScheme(),
+        )
+        sys, _ = symbolic_discretize(pdesys, disc)
+        (; narr = narrayeqs_interior(sys), arr = interior_size(sys))
+    end
+    @test sizes[1].narr == 1
+    @test sizes[2].narr == 1
+    @test sizes[1].arr == sizes[2].arr
 end
 
 @testset "Stationary (NonlinearProblem) still works with ArrayDiscretization" begin
@@ -718,6 +893,20 @@ end
     @named ok_sys = PDESystem(eq, bcs, domains, [t, x], [u(t, x)])
     sys_strict, _ = symbolic_discretize(ok_sys, strict)
     @test narrayeqs_interior(sys_strict) == 1
+
+    # WENO / FunctionalScheme advection is supported in slice form.
+    strict_weno = MOLFiniteDifference(
+        [x => 0.1], t;
+        discretization_strategy = StrictArrayDiscretization(),
+        advection_scheme = WENOScheme(),
+    )
+    @named weno_sys = PDESystem(
+        Dt(u(t, x)) ~ -Dx(u(t, x)),
+        [u(0, x) ~ exp(-100 * (x - 0.3)^2), u(t, 0) ~ 0.0, u(t, 1) ~ 0.0],
+        domains, [t, x], [u(t, x)]
+    )
+    sys_weno, _ = symbolic_discretize(weno_sys, strict_weno)
+    @test narrayeqs_interior(sys_weno) == 1
 
     # Periodic boundaries are supported: the points whose stencils wrap over the seam are
     # pointwise for the same structural reason the frame is, so strict mode accepts them.

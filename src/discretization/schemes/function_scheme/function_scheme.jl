@@ -98,3 +98,36 @@ end
         init = []
     )
 end
+
+"""
+    trace_functional_scheme(F, s, x)
+
+Trace `F.interior` once with placeholder symbolic tap values (`û`) and coordinates
+(`x̂`), plus — when the scheme is nonuniform and `s.dxs[x]` is a vector — placeholder
+step sizes (`dx̂`). Returns `(expr, û, x̂, taps, dx̂)` where `taps = half_range(F.interior_points)`
+and `dx̂` is `nothing` when a scalar `dx` was used.
+
+The placeholders are independent of any grid index, so the same expression can be
+substituted onto shifted slices for the whole core region (see `array_functional_rules`).
+This mirrors the argument contract of [`function_scheme`](@ref): `ps = vcat(F.ps, params(s))`,
+`t = s.time`, and the uniform/`is_nonuniform` handling of `dx`.
+"""
+function trace_functional_scheme(F::FunctionalScheme, s, x)
+    n = F.interior_points
+    taps = collect(half_range(n))
+    û = [Symbolics.variable(Symbol(:û_, i)) for i in 1:n]
+    x̂ = [Symbolics.variable(Symbol(:x̂_, i)) for i in 1:n]
+    ps = vcat(F.ps, params(s))
+    t = Num(s.time)
+    dx = s.dxs[x]
+    if F.is_nonuniform && dx isa AbstractVector
+        dx̂ = [Symbolics.variable(Symbol(:dx̂_, i)) for i in 1:(n - 1)]
+        expr = F.interior(û, ps, t, x̂, dx̂)
+        return expr, û, x̂, taps, dx̂
+    else
+        # Scalar dx (uniform grid, or a nonuniform-capable scheme called with a Number).
+        expr = F.interior(û, ps, t, x̂, dx)
+        return expr, û, x̂, taps, nothing
+    end
+end
+

@@ -16,11 +16,12 @@
 # `array_bands`, a count that does not depend on the grid resolution.
 #
 # When an equation contains a pattern that is not representable as slice broadcasts
-# (WENO/functional advection schemes, nonlinear or spherical laplacians, integrals,
-# mixed derivatives, interfaces joining two different variables, boundary values appearing
-# in the interior equation, callbacks, staggered grids, variables of differing
-# dimensionality), the whole equation falls back to pointwise scalar discretization,
-# producing numerics identical to `ScalarizedDiscretization`.
+# (nonlinear or spherical laplacians, integrals, mixed derivatives, interfaces joining
+# two different variables, boundary values appearing in the interior equation, callbacks,
+# staggered grids, variables of differing dimensionality), the whole equation falls back
+# to pointwise scalar discretization, producing numerics identical to
+# `ScalarizedDiscretization`. Functional / WENO advection is handled in slice form by
+# tracing the scheme once and substituting shifted slices for its stencil taps.
 
 struct ArrayDiscretizationFallback <: Exception
     msg::String
@@ -156,8 +157,13 @@ function discretize_equation_array_form(
     )
     get_grid_type(s) <: StaggeredGrid &&
         throw(ArrayDiscretizationFallback("staggered grids are not supported"))
-    derivweights.advection_scheme isa UpwindScheme ||
-        throw(ArrayDiscretizationFallback("only UpwindScheme advection is supported"))
+    scheme = derivweights.advection_scheme
+    (scheme isa UpwindScheme || scheme isa FunctionalScheme) ||
+        throw(
+        ArrayDiscretizationFallback(
+            "only UpwindScheme and FunctionalScheme advection are supported"
+        )
+    )
 
     args = ivs(eqvar, s)
     for u in depvars
@@ -251,11 +257,25 @@ function array_core_equation(
     derivrules = array_cartesian_rules(
         s, depvars, pdeorders, derivweights, ranges, indexmap, periodic
     )
-    windrules = array_winding_rules(
-        terms, s, depvars, pdeorders, derivweights, ranges, indexmap,
-        vcat(varrules, gridrules), periodic
-    )
-    ctx = ArrayifyContext(vcat(windrules, derivrules, varrules, gridrules), s.time)
+    # FunctionalScheme owns first-order derivatives (mirroring the scalar path's
+    # `skip = [1]`); UpwindScheme owns all odd orders via winding.
+    scheme = derivweights.advection_scheme
+    if scheme isa FunctionalScheme
+        advrules = array_functional_rules(
+            scheme, s, depvars, pdeorders, ranges, indexmap, periodic
+        )
+        windrules = array_winding_rules(
+            terms, s, depvars, pdeorders, derivweights, ranges, indexmap,
+            vcat(varrules, gridrules), periodic; skip = [1]
+        )
+        adv_and_wind = vcat(advrules, windrules)
+    else
+        adv_and_wind = array_winding_rules(
+            terms, s, depvars, pdeorders, derivweights, ranges, indexmap,
+            vcat(varrules, gridrules), periodic
+        )
+    end
+    ctx = ArrayifyContext(vcat(adv_and_wind, derivrules, varrules, gridrules), s.time)
 
     lhs = arrayify(pde.lhs, ctx)
     rhs = arrayify(pde.rhs, ctx)
@@ -327,15 +347,23 @@ end
 """
 The most negative and most positive tap offsets any derivative in the equation applies in
 direction `x`, mirroring the interior branches of `central_difference_weights_and_stencil`
-and `_upwind_difference`.
+and `_upwind_difference`, and — for first-order derivatives under a `FunctionalScheme` —
+`get_f_taps_coords`.
 """
 function array_tap_extents(x, pdeorders, derivweights)
     mintap = 0
     maxtap = 0
+    scheme = derivweights.advection_scheme
     for d in pdeorders[x]
         if iseven(d)
             Dop = derivweights.map[Differential(x)^d]
             taps = half_range(Dop.stencil_length)
+            mintap = min(mintap, first(taps))
+            maxtap = max(maxtap, last(taps))
+        elseif d == 1 && scheme isa FunctionalScheme
+            # FunctionalScheme does not populate windmap for order 1; the stencil is the
+            # scheme's own interior support.
+            taps = half_range(scheme.interior_points)
             mintap = min(mintap, first(taps))
             maxtap = max(maxtap, last(taps))
         else
@@ -379,14 +407,19 @@ function array_bands(interior, s, args, pdeorders, derivweights, indexmap, perio
             # Taps must stay in range, and no point may take a boundary branch: the
             # centered one at II <= boundary_point_count or II > n - boundary_point_count,
             # the positive winding at II <= offside, the negative one at
-            # II > n - boundary_point_count.
+            # II > n - boundary_point_count, and — for FunctionalScheme order 1 — the
+            # lower/upper boundary functions of `get_f_taps_coords`.
             lo = max(lo, 1 - mintap)
             hi = min(hi, n - maxtap)
+            scheme = derivweights.advection_scheme
             for d in pdeorders[x]
                 if iseven(d)
                     bpc = derivweights.map[Differential(x)^d].boundary_point_count
                     lo = max(lo, bpc + 1)
                     hi = min(hi, n - bpc)
+                elseif d == 1 && scheme isa FunctionalScheme
+                    lo = max(lo, length(scheme.lower) + 1)
+                    hi = min(hi, n - length(scheme.upper))
                 else
                     lo = max(lo, derivweights.windmap[2][Differential(x)^d].offside + 1)
                     hi = min(
@@ -468,11 +501,40 @@ end
 
 """
 The numeric grid values of `x` over the core region, shaped to broadcast along the
-dimension of `x` in an `N`-dimensional array expression.
+dimension of `x` in an `N`-dimensional array expression. With `offset`, the values are
+taken from the range shifted by that many points in `x` (optionally wrapped if `x` is
+periodic), mirroring a stencil tap of a functional scheme.
 """
-function array_grid_vals(x, s, ranges, indexmap, N)
+function array_grid_vals(
+        x, s, ranges, indexmap, N; offset = 0, periodic = nothing
+    )
     j = indexmap[x]
-    vals = collect(s.grid[x][ranges[j]])
+    r = ranges[j] .+ offset
+    if offset != 0 && periodic !== nothing && haskey(periodic, x)
+        r = wrap_periodic_range(r, periodic[x])
+    end
+    vals = collect(s.grid[x][r])
+    N == 1 && return vals
+    return reshape(vals, ntuple(i -> i == j ? length(vals) : 1, N))
+end
+
+"""
+Per-point grid spacings `s.dxs[x]` over the core region, shifted by `offset` in `x` and
+shaped to broadcast along that dimension. Used to substitute the `dx̂` placeholders of a
+nonuniform `FunctionalScheme` (see `function_scheme`, which indexes
+`dx[itap[1:(end - 1)]]`).
+"""
+function array_dx_vals(x, s, ranges, indexmap, N; offset = 0, periodic = nothing)
+    j = indexmap[x]
+    dx = s.dxs[x]
+    dx isa AbstractVector ||
+        throw(ArrayDiscretizationFallback("array_dx_vals requires a vector dx"))
+    r = ranges[j] .+ offset
+    if offset != 0 && periodic !== nothing && haskey(periodic, x)
+        r = wrap_periodic_range(r, periodic[x])
+    end
+    # `s.dxs[x]` has length `n - 1`; indices are cell starts, matching the scalar path.
+    vals = [dx[i] for i in r]
     N == 1 && return vals
     return reshape(vals, ntuple(i -> i == j ? length(vals) : 1, N))
 end
@@ -606,12 +668,13 @@ function array_winding_select(
 end
 
 @inline function array_winding_rules(
-        terms, s, depvars, pdeorders, derivweights, ranges, indexmap, baserules, periodic
+        terms, s, depvars, pdeorders, derivweights, ranges, indexmap, baserules, periodic;
+        skip = Int[]
     )
     coefctx = ArrayifyContext(baserules, s.time)
     ruleobjs = []
     for u in depvars, x in ivs(depvar(u, s), s)
-        for d in filter(isodd, pdeorders[x])
+        for d in setdiff(filter(isodd, pdeorders[x]), skip)
             push!(
                 ruleobjs,
                 @rule *(
@@ -646,7 +709,7 @@ end
     # Default rules for bare odd derivatives (no coefficient): positive winding,
     # mirroring the tail of `generate_winding_rules`.
     for u in depvars, x in ivs(depvar(u, s), s)
-        for d in filter(isodd, pdeorders[x])
+        for d in setdiff(filter(isodd, pdeorders[x]), skip)
             push!(
                 windrules,
                 safe_unwrap((Differential(x)^d)(u)) => array_upwind_difference(
@@ -657,6 +720,60 @@ end
     end
     return windrules
 end
+
+"""
+    array_functional_rules(F, s, depvars, pdeorders, ranges, indexmap, periodic)
+
+Array-form advection rules for a [`FunctionalScheme`](@ref): trace the interior scheme
+once with placeholder taps, then substitute each placeholder for the corresponding
+shifted slice (and each coordinate / step-size placeholder for the matching numeric
+grid array). The result is one `Differential(x)(u) => slice_expr` rule per dependent
+variable and direction that carries a first-order derivative — the array analogue of
+[`generate_advection_rules`](@ref).
+"""
+function array_functional_rules(
+        F::FunctionalScheme, s, depvars, pdeorders, ranges, indexmap, periodic
+    )
+    rules = Pair[]
+    N = length(ranges)
+    for u in depvars, x in ivs(depvar(u, s), s)
+        1 in pdeorders[x] || continue
+        expr, û, x̂, taps, dx̂ = trace_functional_scheme(F, s, x)
+        subst = Pair[]
+        for (k, tap) in enumerate(taps)
+            push!(
+                subst,
+                safe_unwrap(û[k]) => array_slice(
+                    u, s, ranges, indexmap;
+                    shiftx = x, offset = tap, periodic = periodic
+                )
+            )
+            push!(
+                subst,
+                safe_unwrap(x̂[k]) => array_grid_vals(
+                    x, s, ranges, indexmap, N;
+                    offset = tap, periodic = periodic
+                )
+            )
+        end
+        if dx̂ !== nothing
+            # Scalar path: `dx[itap[1:(end - 1)]]` where `itap[k] = II + taps[k]`.
+            for (k, tap) in enumerate(taps[1:(end - 1)])
+                push!(
+                    subst,
+                    safe_unwrap(dx̂[k]) => array_dx_vals(
+                        x, s, ranges, indexmap, N;
+                        offset = tap, periodic = periodic
+                    )
+                )
+            end
+        end
+        slice_expr = arrayify(expr, ArrayifyContext(subst, s.time))
+        push!(rules, safe_unwrap((Differential(x))(u)) => slice_expr)
+    end
+    return rules
+end
+
 
 struct ArrayifyContext
     rules::Vector{<:Pair}
