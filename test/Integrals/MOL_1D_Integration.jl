@@ -72,22 +72,9 @@ end
         eqs, bcs, domains, [t, x], [integrand(t, x), cumuSum(t, x)]
     )
 
-    asf(t, x) = t * sin(x)
-
     disc = MOLFiniteDifference([x => 120], t)
 
     @test_broken discretize(pde_system, disc) isa DAEProblem
-    # prob = discretize(pde_system, disc)
-    # sol = solve(prob, Tsit5())
-
-    # xdisc = sol[x]
-    # tdisc = sol[t]
-
-    # cumuSumsol = sol[cumuSum(t, x)]
-
-    # exact = [asf(t_, x_) for t_ in tdisc, x_ in xdisc]
-
-    # @test cumuSumsol ≈ exact atol = 0.36
 end
 
 @testset "Test 01: Test integration over whole domain, (xmin .. xmax)" begin
@@ -164,20 +151,7 @@ end
 
     @named pde_system = PDESystem(eqs, bcs, domains, [t, x], [integrand(t, x), cumuSum(t)])
 
-    asf(t, x) = t * sin(x)
-
     disc = MOLFiniteDifference([x => 120], t)
 
     @test_broken discretize(pde_system, disc) isa DAEProblem
-    # prob = discretize(pde_system, disc)
-    # sol = solve(prob, Tsit5(), saveat=0.1)
-
-    # xdisc = sol[x]
-    # tdisc = sol[t]
-
-    # cumuSumsol = sol[cumuSum(t)]
-
-    # exact = [asf(t_, 3.0) - asf(t_, 0.5) for t_ in tdisc]
-
-    # @test cumuSumsol ≈ exact atol = 0.36
 end

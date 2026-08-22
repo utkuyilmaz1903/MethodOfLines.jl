@@ -137,7 +137,9 @@ end
 """
     ODEFunctionExpr(pdesys, discretization)
 
-Generate an expression for the ODE function produced by method-of-lines discretization.
+Generate an expression for the compiled scalar `ODEFunction`. Runs `mtkcompile`,
+which scalarizes array equations. This is the explicit-RK / codegen path, not the
+default `DAEProblem`.
 """
 function ODEFunctionExpr(
         pdesys::PDESystem, discretization::MethodOfLines.MOLFiniteDifference
@@ -160,6 +162,13 @@ function ODEFunctionExpr(
     end
 end
 
+"""
+    ODEFunction(pdesys, discretization; analytic = nothing, kwargs...)
+
+Compile `pdesys` with `mtkcompile` and return a scalar `ODEFunction`. This
+scalarizes array equations. This is the explicit-RK / codegen path, not the
+default `DAEProblem`.
+"""
 function SciMLBase.ODEFunction(
         pdesys::PDESystem, discretization::MethodOfLines.MOLFiniteDifference;
         analytic = nothing, kwargs...
@@ -195,7 +204,9 @@ end
 """
     generate_code(pdesys, discretization[, filename])
 
-Write generated discretized ODE function code for `pdesys` to `filename`.
+Write the compiled scalar `ODEFunction` for `pdesys` to `filename`. Runs
+`mtkcompile`, which scalarizes array equations. This is the explicit-RK / codegen
+path, not the default `DAEProblem`.
 """
 function generate_code(
         pdesys::PDESystem, discretization::MethodOfLines.MOLFiniteDifference,
@@ -214,10 +225,11 @@ end
 
 Discretize `pdesys` and return a problem ready to `solve`.
 
-For a time-dependent system this builds a `DAEProblem`. MethodOfLines emits residuals of
-the form `D(u) - f ~ 0`, which are already implicit-DAE form, so no `mtkcompile` is
-needed and the array (slice-form) equations reach the generated code intact. Calling
-`solve(prob)` selects the default DAE algorithm.
+For a first-order time-dependent system this builds a `DAEProblem`. MethodOfLines emits
+residuals of the form `D(u) - f ~ 0`, which are already implicit-DAE form, so no
+`mtkcompile` is needed and the array (slice-form) equations reach the generated code
+intact. Calling `solve(prob)` selects the default DAE algorithm. `StaggeredGrid` uses a
+more specific `discretize` method that returns a `SplitODEProblem`.
 
 A few systems cannot be posed as a first-order DAE — those second order in time, and
 those whose initialization equations `BrownFullBasicInit` would not honour. Those fall

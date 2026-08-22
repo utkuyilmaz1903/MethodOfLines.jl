@@ -85,13 +85,16 @@ Currently, the package can discretize almost any system, with some assumptions l
 
   - That the grid is Cartesian.
   - Boundary conditions in time are supplied as initial conditions, not at the end of the simulation interval. If your system requires a final condition, please use a change of variables to rectify this. This is unlikely to change due to upstream constraints.
-  - Integral equations are partially supported. See the [PIDE tutorial](@ref integral) for details.
   - That dependent variables always have the same argument signature, except in BCs.
   - That higher order interface bcs are accompanied by a simple interface of the form `u1(t, x_int) ~ u2(t, x_int)`
   - That boundary conditions do not contain references to derivatives which are not in the direction of the boundary, except in time.
   - That odd order derivatives do not multiply or divide each other, unless the WENO Scheme is used.
-  - That the WENO scheme must be used when there are mixed derivatives.
   - Note that the WENO Scheme is often unstable in more than 1 spatial dimension due to difficulties with boundary handling, this can be avoided if you supply 2 or more bcs per boundary in the dimension along which an advection term acts.
+  - Integral equations are partially supported and emit pointwise scalar equations.
+    Higher mixed derivatives, two-domain interface BCs, derivatives of boundary
+    values, time-literal references such as `u(0, x)`, and functional schemes
+    without a coefficient split likewise remain pointwise. See the
+    [PIDE tutorial](@ref integral) and the [v1.0 migration guide](@ref migrating-to-v1).
 
 ## Reproducibility
 

@@ -2,8 +2,10 @@
 
 ## Why is my result reducing over time, it shouldn't be!
 
-Looks like you've been using the upwind scheme! This is the default scheme for odd ordered derivatives, and while it is very fast and uses low memory, it suffers from a property called numerical dispersion.
-This causes sharp peaks and discontinuities to smooth out over time, and is the reason that we have the [WENO Scheme](@ref adschemes), which while resource intensive and sometimes problematic with exotic BCs, does not have this problem.
+The default scheme for odd-order derivatives is upwind. It is fast and low-memory, and it
+introduces numerical dispersion: sharp peaks and discontinuities smooth out over time.
+The [WENO Scheme](@ref adschemes) does not have this property; it is more expensive and
+can fail with exotic boundary conditions.
 
 To see numerical dispersion in action, take a look at this example:
 
@@ -92,9 +94,26 @@ gif(anim, "mol_convection_2d_test.gif", fps = 5)
 
 ## Why is my large discretized system taking so long to compile?
 
-At the moment, MOL effectively generates an assignment statement to a calculation in its generated code for all points in space, for all variables. Due to the configuration of LLVM for Julia, this leads the compiler to check all operations against all other operations to see what to [SIMD](https://en.wikipedia.org/wiki/Single_instruction,_multiple_data), leading to bad scaling properties with increasing point count.
+For a first-order time-dependent system, `discretize` returns a `DAEProblem`
+whose generated residuals are operations over array slices. For patterns that
+have an array form, the number of symbolic equations does not grow with the
+grid. Call `solve(prob)` and let OrdinaryDiffEq select the DAE algorithm.
 
-There are changes in the works to roll this back in to `for` loops over each point, by maintaining some structural information, which will remedy this problem. Watch this space!
+That scaling does not survive `mtkcompile`, which scalarizes the array
+equations. Every other path compiles through it: stationary systems
+(`NonlinearProblem`), `StaggeredGrid` (`SplitODEProblem`), the compiled
+`ODEProblem` fallback and `analytic` paths, and explicit Runge–Kutta methods
+(`Tsit5`, `SSPRK54`, …), constructed as:
+
+```julia
+sys, tspan = symbolic_discretize(pdesys, discretization)
+prob = ODEProblem(mtkcompile(sys), nothing, tspan)
+sol = solve(prob, Tsit5())
+```
+
+Some patterns emit one scalar equation per affected point even on the
+`DAEProblem` path (integrals, higher mixed derivatives, two-domain interfaces,
+schemes without a coefficient split). Those equations grow with resolution.
 
 ## Why are the corners of my domain held at 0?
 

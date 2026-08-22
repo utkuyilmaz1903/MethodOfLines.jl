@@ -1,7 +1,10 @@
 
 # [Generated Code for the Brusselator Equation](@id brusscode)
 
-Here's the generated Julia code for the [Brusselator](@ref brusselator), with `dx = dy = 1/4`.
+Julia code generated on the compiled `ODEProblem` path (`mtkcompile`)
+for the [Brusselator](@ref brusselator) at `dx = dy = 1/4`. The default
+`discretize` path does not scalarize; `symbolic_discretize` returns a small
+number of array equations over slices.
 
 ```julia
 begin

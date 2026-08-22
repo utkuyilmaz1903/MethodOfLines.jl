@@ -37,6 +37,7 @@ domains = [
 
 disc = MOLFiniteDifference([x => 30], t, advection_scheme = WENOScheme())
 
+# `analytic` selects the compiled `ODEProblem` path.
 prob = discretize(pdesys, disc; analytic = getfield(pdesys, :analytic_func))
 
 sol = solve(prob, FBDF())

@@ -1,6 +1,9 @@
 # [Generated ODE system for the Brusselator Equation](@id brusssys)
 
-Here's the generated system of equations for the [Brusselator](@ref brusselator), with `dx = dy = 1/4`.
+Scalar equations produced by `mtkcompile` on the compiled `ODEProblem` path
+for the [Brusselator](@ref brusselator) at `dx = dy = 1/4`. The default
+`discretize` path does not scalarize; `symbolic_discretize` returns a small
+number of array equations over slices.
 
 ## Equations for u
 ```julia

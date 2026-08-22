@@ -38,7 +38,7 @@ Note that the second argument to `MOLFiniteDifference` is optional, all paramete
 
 Currently, implemented options for `advection_scheme` are `UpwindScheme()` and `WENOScheme()`, defaults to upwind. See [advection schemes](@ref adschemes) for more information, and the [WENO tutorial](@ref weno_tutorial) for a worked comparison of the two.
 
-Currently supported options are `grid_align`: `center_align` and `edge_align`. Edge align will give better accuracy with Neumann boundary conditions. Defaults to `center_align`.
+Currently supported options are `grid_align`: `center_align`, `edge_align`, and `StaggeredGrid()`. Edge align will give better accuracy with Neumann boundary conditions. Defaults to `center_align`.
 
 `center_align`: naive grid, starting from lower boundary, ending on upper boundary with step of `dx`
 
@@ -46,13 +46,15 @@ Currently supported options are `grid_align`: `center_align` and `edge_align`. E
 
 `should_transform`: Whether to automatically transform the system to make it compatible with MethodOfLines where possible, defaults to true. If your system has no mixed derivatives, all derivatives are purely of a dependent variable i.e. `Dx(u_aux(t,x))` not `Dx(v(t,x)*u(t,x))`, excepting nonlinear and spherical Laplacians for which this holds for the innermost derivative argument, and no expandable derivatives, this can be set to false for better discretization performance at the cost of generality, if you perform these transformations yourself.
 
+`useIR` is unused. It is retained for struct compatibility.
+
 MethodOfLines generates the interior of each PDE as a single symbolic array equation over slices of the discretized variables, e.g. `D(u[2:n-1]) - (u[1:n-2] .- 2u[2:n-1] .+ u[3:n]) ./ dx^2 ~ 0`. This keeps the number of symbolic equations independent of the grid resolution and scales much better during symbolic processing. Nonlinear Laplacians `Dx(a(u) * Dx(u))`, spherical Laplacians `r^-2 Dr(r^2 Dr(u))`, mixed first-order derivatives `Dx(Dy(u))`, WENO / functional advection (on uniform grids, and on nonuniform grids — periodic or not — for schemes that provide a coefficient split; WENO does; user schemes opt in by defining a method on `MethodOfLines.array_scheme_split`), staggered grids, self-periodic interfaces and boundary values appearing inside an interior equation (e.g. `u(t, 1)`) are included in the array form, including on wrap boxes near a periodic seam. Patterns without a slice representation (nonuniform advection schemes without a coefficient split, schemes that read the grid coordinate, integrals, higher mixed derivatives, two-domain interface BCs, derivatives of boundary values, time-literal references such as `u(0, x)`, boundary values on edge-aligned grids, stationary systems) automatically fall back to pointwise scalar equations for the affected equation.
 
 Any unrecognized keyword arguments are passed to the generated problem constructor; see the [ModelingToolkit problem documentation](https://docs.sciml.ai/ModelingToolkit/stable/API/problems/#Dynamical-systems) for available options.
 
 ## Problem types
 
-`discretize` returns a `DAEProblem` for a time-dependent system:
+For a first-order time-dependent system, `discretize` returns a `DAEProblem`:
 
 ```julia
 
@@ -78,13 +80,14 @@ whose initialization equations `BrownFullBasicInit` would not honour. They fall 
 Time-independent systems have no derivative to keep implicit, and discretize to a
 `NonlinearProblem`.
 
-The solution is a `PDETimeSeriesSolution` in every case, indexed and interpolated by the
-`PDESystem`'s own variables: `sol[u(t, x)]`, `sol(t, x)`.
+Time-dependent solutions are a `PDETimeSeriesSolution`; stationary solutions are a
+`PDENoTimeSolution`. Both are indexed and interpolated by the `PDESystem`'s own
+variables: `sol[u(t, x)]`, `sol(t, x)`.
 
 ## Explicit Runge–Kutta methods and other problem types
 
 Explicit Runge–Kutta methods such as `Tsit5()` and `SSPRK54()` solve `ODEProblem`s, not
-the `DAEProblem` returned by `discretize`. To use one, start from `symbolic_discretize`,
+the `DAEProblem` that `discretize` returns for a first-order time-dependent system. To use one, start from `symbolic_discretize`,
 which returns the discretized system and the time span, then compile the system into an
 `ODEProblem`:
 
@@ -102,10 +105,13 @@ benefit of the array form. Prefer `discretize` unless you specifically need an
 
 ## [Migrating to v1](@id migrating-to-v1)
 
-- `discretize` returns a `DAEProblem` rather than an `ODEProblem` for time-dependent
-  systems. Call `solve(prob)` to use the default DAE algorithm. Explicit Runge–Kutta
-  methods like `Tsit5()` require the compiled `ODEProblem` path above. Solution indexing
-  is unchanged.
+- For a first-order time-dependent system, `discretize` returns a `DAEProblem`
+  rather than an `ODEProblem`. Call `solve(prob)` to use the default DAE algorithm.
+  Stationary systems return a `NonlinearProblem`. `StaggeredGrid` returns a
+  `SplitODEProblem`. Systems that cannot be posed as a first-order DAE (see above)
+  and the `analytic` path return a compiled `ODEProblem`. Explicit Runge–Kutta
+  methods like `Tsit5()` require the compiled `ODEProblem` path above. Solution
+  indexing is unchanged.
 - Discretization strategy options were removed. MethodOfLines always uses array-form
   equations with automatic pointwise fallback for unsupported patterns.
 - To construct the pre-v1 compiled `ODEProblem`, use `symbolic_discretize` plus

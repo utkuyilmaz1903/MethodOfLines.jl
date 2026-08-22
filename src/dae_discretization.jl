@@ -1,18 +1,19 @@
 # DAEProblem construction, preserving array (slice-form) equations.
 #
-# `discretize` runs `mtkcompile`, which scalarizes array equations before codegen: an
-# `ODEProblem` needs `D(x) = f(x)`, and isolating the derivative is structural
-# simplification. MethodOfLines already emits residuals `D(u) - f ~ 0`, which is exactly
-# the implicit-DAE form `DAEProblem` consumes, so this path skips `mtkcompile` and the
-# array equations survive into the generated code.
+# MethodOfLines emits residuals `D(u) - f ~ 0`. A `DAEProblem` consumes that
+# form directly, so this path does not call `mtkcompile` and the array equations
+# reach codegen. Isolating `D(x) = f(x)` for an `ODEProblem` is structural
+# simplification and scalarizes them.
 
 """
     BrownFullBasicInitUnsafeError(offenders)
 
-Raised by `DAEProblem(::PDESystem, ::MOLFiniteDifference)` when the discretized system
-carries initialization equations that `BrownFullBasicInit()` would silently discard, so no
-default initialization algorithm can be chosen safely. `offenders` pairs each such
-equation with the reason it is not honored.
+Raised when the discretized system carries initialization equations that
+`BrownFullBasicInit()` would silently discard, so no default initialization
+algorithm can be chosen safely. Thrown by
+`DAEProblem(::PDESystem, ::MOLFiniteDifference)` and by `discretize` when
+`fallback = false`. `offenders` pairs each such equation with the reason it is
+not honored.
 """
 struct BrownFullBasicInitUnsafeError <: Exception
     offenders::Vector{Pair{Equation, String}}
@@ -25,9 +26,9 @@ function Base.showerror(io::IO, e::BrownFullBasicInitUnsafeError)
         MethodOfLines cannot build a `DAEProblem` for this system without `mtkcompile`.
 
         `BrownFullBasicInit()` is the only initialization algorithm that reproduces the
-        `discretize` (`ODEProblem` + `mtkcompile`) result on the array-equation path. It
-        takes the differential variables' initial values as given and solves for the
-        algebraic variables and the derivatives, so it would silently ignore these
+        compiled `ODEProblem` result on the array-equation path. It takes the
+        differential variables' initial values as given and solves for the algebraic
+        variables and the derivatives, so it would silently ignore these
         initialization equations:
         """
     )
@@ -39,9 +40,10 @@ function Base.showerror(io::IO, e::BrownFullBasicInitUnsafeError)
         """
 
 
-        Use `discretize(pdesys, disc)` instead. That path runs `mtkcompile`, which honors
-        these constraints, at the cost of scalarizing the array equations: the slice form
-        cannot currently be preserved for this system.
+        Pass `initializealg` explicitly to `DAEProblem` or `discretize`, or call
+        `discretize(pdesys, disc)` with the default `fallback = true`. The fallback
+        runs `mtkcompile` and returns an `ODEProblem`, which honors these constraints
+        and scalarizes the array equations.
         """
     )
     return

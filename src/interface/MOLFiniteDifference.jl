@@ -35,7 +35,7 @@ A discretization algorithm.
 - `grid_align`: The grid alignment marker.
 - `should_transform`: Whether supported symbolic transformations are applied before
   discretization.
-- `useIR`: Whether ModelingToolkit's intermediate representation is used.
+- `useIR`: Unused. Retained for struct compatibility.
 - `callbacks`: Symbolic discretization callbacks.
 - `kwargs`: Additional keyword arguments forwarded to the generated problem.
 

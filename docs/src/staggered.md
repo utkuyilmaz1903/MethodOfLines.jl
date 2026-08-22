@@ -1,6 +1,6 @@
 # Staggered Grids
 
-For more examples of staggered grid implementations for the wave equation, see the tests `/test/pde_systems/wave_eq_staggered.jl`
+For more examples of staggered grid implementations for the wave equation, see the tests [`test/Wave_Eq_Staggered/wave_eq_staggered.jl`](https://github.com/SciML/MethodOfLines.jl/blob/master/test/Wave_Eq_Staggered/wave_eq_staggered.jl).
 
 Hyperbolic PDEs are often most written as a system of first-order equations. When the original system is of second-order (e.g., wave equation), this results in a natural splitting of variables as demonstrated below. Staggered-grid numerical schemes have been developed for such equations as efficient and conservative finite difference schemes.
 
@@ -11,6 +11,10 @@ Solvers should be chosen carefully, the only officially supported solver is `Spl
 Staggered grid functionality is still in its infancy. Please open issues if unexpected results occur or needed functionality is not present.
 
 Staggered grids emit the interior of each PDE as a single symbolic array equation over slices, keeping the symbolic equation count independent of the grid resolution.
+
+For a time-dependent staggered system, `discretize` dispatches to a
+`StaggeredGrid`-specific method that runs `mtkcompile` and returns a
+`SplitODEProblem`, which `SplitEuler` consumes.
 
 ```
 using OrdinaryDiffEq, ModelingToolkit, MethodOfLines, DomainSets
@@ -39,8 +43,7 @@ domains = [t in Interval(0.0, tmax),
 @named pdesys = PDESystem(eq, bcs, domains, [t,x], [ρ(t,x), ϕ(t,x)]);
 
 discretization = MOLFiniteDifference([x=>dx], t, grid_align=MethodOfLines.StaggeredGrid(), edge_aligned_var=ϕ(t,x));
-sys, tspan = symbolic_discretize(pdesys, discretization)
-prob = ODEProblem(mtkcompile(sys), nothing, tspan);
+prob = discretize(pdesys, discretization);
 
 sol = solve(prob, SplitEuler(), dt=dt);
 ```

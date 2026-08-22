@@ -15,7 +15,7 @@ julia>] activate MethodOfLines
 
 MethodOfLines.jl makes heavy use of [`Symbolics.jl`](https://symbolics.juliasymbolics.org/dev/) and [`SymbolicUtils.jl`](https://symbolicutils.juliasymbolics.org), especially the replacement rules from the latter.
 
-Take a look at [`src/discretization/MOL_discretization.jl`](https://github.com/SciML/MethodOfLines.jl/blob/master/src/MOL_discretization.jl) to get a high level overview of how the discretization works. A more concise description can be found [here](@ref hiw). Feel free to post an issue if you would like help understanding anything, or want to know developer opinions on the best way to go about implementing something.
+Take a look at [`src/MOL_discretization.jl`](https://github.com/SciML/MethodOfLines.jl/blob/master/src/MOL_discretization.jl) to get a high level overview of how the discretization works. A more concise description can be found [here](@ref hiw). Feel free to post an issue if you would like help understanding anything, or want to know developer opinions on the best way to go about implementing something.
 
 ## Adding new finite difference schemes
 
@@ -27,9 +27,11 @@ Take a look at [`src/discretization/generate_finite_difference_rules.jl`](https:
 
 First terms are split, isolating particular cases. Then, rules are generated and applied.
 
-Identify a rule which will match your case, then write a function that will handle how to apply that scheme for each index in the interior, for each combination of independent and dependant variables.
+A new scheme needs a pointwise rule (the fallback contract below) and an array-form
+reconstruction in [`src/discretization/discretize_equations.jl`](https://github.com/SciML/MethodOfLines.jl/blob/master/src/discretization/discretize_equations.jl),
+or a documented `ArrayFormFallback` if no slice form exists yet.
 
-This should be a function of the current index `II::CartesianIndex`, an independent variable `x` which represents the direction of the derivative, and a dependent variable `u`, which is the variable of which the derivative will be taken. The discrete representation of `u` is found in `s.discvars[u]`, which is an array with the same number of spatial dimensions as `u`, each index a symbol representing the discretized `u` at that index. Using this, and cartesian index offsets from `II`, create a finite difference/volume symbolic expression for the approximation of the derivative form you are trying to discretize. This should be returned.
+The pointwise fallback is a function of the current index `II::CartesianIndex`, an independent variable `x` which represents the direction of the derivative, and a dependent variable `u`, which is the variable of which the derivative will be taken. The discrete representation of `u` is found in `s.discvars[u]`, which is an array with the same number of spatial dimensions as `u`, each index a symbol representing the discretized `u` at that index. Using this, and cartesian index offsets from `II`, create a finite difference/volume symbolic expression for the approximation of the derivative form you are trying to discretize. This should be returned.
 
 For example, the following is a simple rule and function that would discretize derivatives of each dependent variable `u`in each dependent variable `x` with the second order central difference approximation:
 
@@ -78,4 +80,7 @@ Finally, include your rules in the vector of rules to be used to replace terms i
 
 ## Inspecting generated code
 
-To get the generated code for your system, use `code = ODEFunctionExpr(prob)`, or `MethodOfLines.generate_code(pdesys, discretization, "my_generated_code_filename.jl")`, which will create a file called `my_generated_code_filename.jl` in `pwd()`. This can be useful to find errors in the discretization, but note that it is not recommended to use this code directly, calling `solve(prob, AppropriateSolver())` will handle this for you.
+`ODEFunctionExpr(pdesys, discretization)` and `generate_code` compile the
+system with `mtkcompile` and emit the scalar `ODEFunction` code. That is the
+explicit-RK path, not the default `DAEProblem`. For the array residuals, inspect
+`equations` of the system returned by `symbolic_discretize`.

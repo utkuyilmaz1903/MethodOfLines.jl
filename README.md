@@ -14,9 +14,14 @@ of symbolically-defined PDEs in N dimensions.
 
 It uses symbolic expressions for systems of partial differential equations as defined with `ModelingToolkit.jl`, and `Interval` from `DomainSets.jl` to define the space(time) over which the simulation runs.
 
-This project is under active development, therefore the interface is subject to change. The [docs](https://docs.sciml.ai/MethodOfLines/dev/) will be updated to reflect any changes, please check back for current usage information.
-
-Note that this package does not currently scale well to high resolution (high point count) problems, though there are changes in the works to remedy this.
+For a first-order time-dependent system, `discretize` returns a `DAEProblem`
+whose residuals are symbolic array equations, so the symbolic equation count is
+independent of grid resolution for patterns with an array form. Stationary
+systems return a `NonlinearProblem`, `StaggeredGrid` returns a
+`SplitODEProblem`, and systems that cannot be posed as a first-order DAE, or
+that supply `analytic`, return a compiled `ODEProblem`. Explicit Runge–Kutta
+methods require the compiled path: `symbolic_discretize`, `mtkcompile`, and
+`ODEProblem`. See the [documentation](https://docs.sciml.ai/MethodOfLines/dev/).
 
 Allowable terms in the system include, but are not limited to
 

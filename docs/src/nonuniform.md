@@ -4,10 +4,10 @@ For more information on how to use a non-uniform rectilinear grid, see the docs 
 
 Any strictly increasing `AbstractVector` of grid points spanning the domain can be used as a grid (except a `StepRangeLen`, which denotes a uniform grid). A common choice for problems with localized features is a stretched grid that clusters points where resolution is needed, such as a `sinh`-stretched grid or one generated from a user-chosen resolution density; the tutorial linked above demonstrates both constructions.
 
-MethodOfLines exports the function `chebyspace`, which can be used to conveniently construct a [Chebyshev grid](https://en.wikipedia.org/wiki/Chebyshev_nodes), which may prove more accurate in certain cases, especially with higher approximation order (benchmarking to come, watch this space). It takes the arguments `chebyspace(N, dom)` where `N` is the number of points, and `dom` is the domain set for the variable you want to discretize in this way.
+MethodOfLines exports the function `chebyspace`, which can be used to conveniently construct a [Chebyshev grid](https://en.wikipedia.org/wiki/Chebyshev_nodes), which may prove more accurate in certain cases, especially with higher approximation order. It takes the arguments `chebyspace(N, dom)` where `N` is the number of points, and `dom` is the domain set for the variable you want to discretize in this way.
 
 ```@example cheby
-using OrdinaryDiffEq, ModelingToolkit, MethodOfLines, DomainSets
+using ModelingToolkit, MethodOfLines, DomainSets
 
 # Parameters, variables, and derivatives
 @parameters t x
@@ -34,3 +34,5 @@ discretization = MOLFiniteDifference([discx], t)
 
 prob = discretize(pdesys, discretization)
 ```
+
+This system is first order in time, so `prob` is a `DAEProblem`; integrate it with `solve(prob)`.

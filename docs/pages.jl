@@ -18,6 +18,7 @@ pages = [
     "Boundary Conditions" => "boundary_conditions.md",
     "Advection Schemes" => "advection_schemes.md",
     "Non-Uniform Rectilinear Grids" => "nonuniform.md",
+    "Staggered Grids" => "staggered.md",
     "Curvilinear Grids" => "curvilinear_grids.md",
     "FAQs" => "faq.md",
     "How it Works" => "howitworks.md",
